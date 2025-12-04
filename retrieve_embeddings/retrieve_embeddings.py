@@ -273,9 +273,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--mean_pooling",
-        action="store_true",
-        help="Apply mean pooling to embeddings across sequence length. "
-        "Reduces memory usage by averaging per-token embeddings into a single vector per sequence (default: False)",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Apply mean pooling to embeddings (default: True). Use --no-mean_pooling to disable."
     )
 
     args = parser.parse_args()
