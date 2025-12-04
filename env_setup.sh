@@ -1,10 +1,26 @@
 #!/usr/bin/env bash
-conda create -y -n evo_embeddings python=3.12
+set -euo pipefail
+
+# Initialize conda in this shell (needed so `conda activate` works in scripts)
+eval "$(conda shell.bash hook)"
+
+# Create the environment if it doesn't already exist
+if ! conda env list | grep -q '^evo_embeddings'; then
+  conda create -y -n evo_embeddings python=3.12
+fi
+
+# Activate it
 conda activate evo_embeddings
-conda install -c nvidia cuda-nvcc cuda-cudart-dev
-conda install -c conda-forge flash-attn=2.7.4
-pip install evo-model
-pip install hf_transfer
+
+# Install packages into THIS env
+conda install -y -c nvidia cuda-nvcc cuda-cudart-dev
+conda install -y -c conda-forge flash-attn=2.7.4
+
+# Make sure we have a NumPy version that plays nice with evo-model
+python -m pip install --force-reinstall "numpy<2.0"
+
+# Evo + helpers
+python -m pip install evo-model hf_transfer
 
 
 # 1. Initialize conda for bash
