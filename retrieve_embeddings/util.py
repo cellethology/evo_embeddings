@@ -37,8 +37,9 @@ def validate_sequence(sequence: str, seq_id: str = "") -> Tuple[bool, str]:
         )
 
     if seq_len > MAX_SEQUENCE_LENGTH:
-        return False, (
-            f"Sequence too long (length {seq_len}, maximum {MAX_SEQUENCE_LENGTH})"
+        # input sequence can be longer than context length, performance may be impacted
+        return True, (
+            f"WARNING: sequence longer than context length (length {seq_len}, maximum {MAX_SEQUENCE_LENGTH})"
             f"{': ' + seq_id if seq_id else ''}"
         )
 
