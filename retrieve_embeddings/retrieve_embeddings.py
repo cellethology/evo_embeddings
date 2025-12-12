@@ -69,7 +69,6 @@ def process_sequences(
     batch_size: int = 8,
     device: str = "cuda:0",
     prepend_bos: bool = True,
-    mean_pooling: bool = True,
 ) -> None:
     """
     Process sequences in batches and extract embeddings.
@@ -83,8 +82,6 @@ def process_sequences(
         batch_size: Number of sequences to process per batch (default: 8)
         device: Device to run inference on (default: "cuda:0")
         prepend_bos: Whether to prepend BOS token (default: False)
-        mean_pooling: If True, average embeddings across sequence length to get a single
-            vector per sequence. Reduces memory usage significantly (default: False)
 
     Raises:
         ValueError: If sequences and sequence_ids have different lengths
@@ -99,10 +96,6 @@ def process_sequences(
         f"Processing {len(sequences)} sequences in batches of {batch_size} "
         f"on device {device}"
     )
-    if mean_pooling:
-        logger.info(
-            "Mean pooling enabled: embeddings will be averaged across sequence length"
-        )
 
     dataset = SequenceDataset(sequences)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
