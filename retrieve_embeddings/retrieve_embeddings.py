@@ -5,11 +5,11 @@ from typing import List, Tuple
 
 import numpy as np
 import torch
-from torch import nn
-from evo import Evo
-from evo.scoring import prepare_batch
+from evo.scoring import logits_to_logprobs, prepare_batch
+from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
+from evo import Evo
 from retrieve_embeddings.util import (
     load_sequences_from_fasta,
     save_embeddings_to_npz,
@@ -23,17 +23,30 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+class SequenceDataset(Dataset):
+    """Simple dataset to wrap a list of sequences for DataLoader."""
+
+    def __init__(self, sequences: list[str]):
+        self.sequences = sequences
+
+    def __len__(self):
+        return len(self.sequences)
+
+    def __getitem__(self, idx):
+        return self.sequences[idx]
+
+
 def setup_model_for_embeddings(
     model_name: str = "evo-1.5-8k-base",
     device: str = "cuda:0",
 ) -> Tuple[torch.nn.Module, object]:
     """
     Initialize Evo model and configure it to return embeddings instead of logits.
-    
+
     Args:
         model_name: Name of the Evo model to load
         device: Device to run inference on (default: "cuda:0")
-        
+
     Returns:
         Tuple of (model, tokenizer) where model is configured to return embeddings
     """
@@ -42,46 +55,9 @@ def setup_model_for_embeddings(
     model, tokenizer = evo_model.model, evo_model.tokenizer
     model.to(device)
     model.eval()
-    
+
     logger.info("Model loaded and configured for embedding extraction")
     return model, tokenizer
-
-
-def extract_embeddings_batch(
-    model: torch.nn.Module,
-    tokenizer: object,
-    sequences: List[str],
-    device: str = "cuda:0",
-    prepend_bos: bool = False,
-) -> Tuple[torch.Tensor, List[int]]:
-    """
-    Extract embeddings for a batch of sequences.
-
-    Args:
-        model: Evo model instance
-        tokenizer: Evo tokenizer instance
-        sequences: List of DNA sequences to process
-        device: Device to run inference on (default: "cuda:0")
-        prepend_bos: Whether to prepend BOS token (default: False)
-
-    Returns:
-        Tuple of (embeddings tensor, sequence_lengths list)
-        Embeddings have shape [batch_size, max_seq_length + (1 if prepend_bos else 0), embedding_dim]
-        sequence_lengths are the original sequence lengths (without BOS or padding)
-    """
-    # Prepare batch: tokenize and pad sequences
-    input_ids, seq_lengths = prepare_batch(
-        seqs=sequences,
-        tokenizer=tokenizer,
-        prepend_bos=prepend_bos,
-        device=device,
-    )
-
-    # Extract embeddings using forward pass
-    with torch.no_grad():
-        embeddings, _ = model(input_ids)  # (batch, length, embed_dim)
-
-    return embeddings, seq_lengths
 
 
 def process_sequences(
@@ -92,8 +68,8 @@ def process_sequences(
     output_path: str,
     batch_size: int = 8,
     device: str = "cuda:0",
-    prepend_bos: bool = False,
-    mean_pooling: bool = False,
+    prepend_bos: bool = True,
+    mean_pooling: bool = True,
 ) -> None:
     """
     Process sequences in batches and extract embeddings.
@@ -124,70 +100,62 @@ def process_sequences(
         f"on device {device}"
     )
     if mean_pooling:
-        logger.info("Mean pooling enabled: embeddings will be averaged across sequence length")
+        logger.info(
+            "Mean pooling enabled: embeddings will be averaged across sequence length"
+        )
+
+    dataset = SequenceDataset(sequences)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
     # Lists to collect all embeddings and IDs
-    all_ids: List[str] = []
     all_embeddings: List[np.ndarray] = []
 
-    # Process sequences in batches
-    num_batches = (len(sequences) + batch_size - 1) // batch_size
-
-    with tqdm(total=len(sequences), desc="Extracting embeddings") as pbar:
-        for batch_idx in range(num_batches):
-            start_idx = batch_idx * batch_size
-            end_idx = min(start_idx + batch_size, len(sequences))
-
-            batch_sequences = sequences[start_idx:end_idx]
-            batch_ids = sequence_ids[start_idx:end_idx]
-
+    with torch.inference_mode():
+        for batch_sequences in tqdm(
+            dataloader, desc="Extracting Features", unit="batch"
+        ):
+            input_ids, _ = prepare_batch(
+                seqs=batch_sequences,
+                tokenizer=tokenizer,
+                prepend_bos=prepend_bos,
+                device=device,
+            )
             try:
-                # Extract embeddings for the batch
-                batch_embeddings, batch_seq_lengths = extract_embeddings_batch(
-                    model=model,
-                    tokenizer=tokenizer,
-                    sequences=batch_sequences,
-                    device=device,
-                    prepend_bos=prepend_bos,
+                # The Evo model forward pass returns (logits, hidden_states)
+                while True:
+                    try:
+                        logits, _ = model(input_ids)
+                    except torch.cuda.OutOfMemoryError:
+                        print("CUDA Out of Memory during model inference. Retrying...")
+                        torch.cuda.empty_cache()
+                        continue
+                    break
+
+                sequence_embeddings = logits_to_logprobs(
+                    logits, input_ids, trim_bos=True
                 )
 
-                # Extract embeddings for each sequence in the batch
-                for i, seq_id in enumerate(batch_ids):
-                    # Extract embeddings for this specific sequence
-                    # Note: embeddings are padded, so we need to extract the actual sequence length
-                    seq_length = batch_seq_lengths[i]
-                    if prepend_bos:
-                        # Skip BOS token if prepended (first position)
-                        # Take seq_length tokens after BOS
-                        seq_embeddings = batch_embeddings[i, 1 : seq_length + 1]
-                    else:
-                        # Take seq_length tokens from the start
-                        seq_embeddings = batch_embeddings[i, :seq_length]
-
-                    # Apply mean pooling if requested (reduces memory usage)
-                    if mean_pooling:
-                        # Average across sequence length dimension: (seq_length, embedding_dim) -> (embedding_dim,)
-                        seq_embeddings = torch.mean(seq_embeddings, dim=0)
-
-                    # Convert to numpy and store
-                    # Convert to float32 first to avoid BFloat16 issues with numpy
-                    all_ids.append(seq_id)
-                    all_embeddings.append(seq_embeddings.cpu().float().numpy())
-
-                pbar.update(len(batch_sequences))
-
-            except Exception as e:
-                logger.error(
-                    f"Error processing batch {batch_idx + 1}/{num_batches}: {str(e)}"
+                all_embeddings.append(
+                    sequence_embeddings.to(dtype=torch.float32).cpu().numpy()
                 )
-                # Continue with next batch
-                pbar.update(len(batch_sequences))
+
+            except torch.cuda.OutOfMemoryError:
+                print("CUDA Out of Memory on a batch. Skipping batch.")
+                torch.cuda.empty_cache()
                 continue
 
+    # check all_embeddings is same length as sequence_ids
+    all_embeddings = np.concatenate(all_embeddings, axis=0)
+    if all_embeddings.shape[0] != len(sequence_ids):
+        raise ValueError(
+            f"All embeddings ({all_embeddings.shape[0]}) and sequence_ids ({len(sequence_ids)}) "
+            "must have the same length"
+        )
+
     # Save all embeddings to a single .npz file
-    logger.info(f"Saving {len(all_ids)} embeddings to {output_path}...")
+    logger.info(f"Saving {len(sequence_ids)} embeddings to {output_path}...")
     save_embeddings_to_npz(
-        ids=all_ids,
+        ids=sequence_ids,
         embeddings=all_embeddings,
         output_path=output_path,
     )
@@ -246,7 +214,7 @@ def main() -> None:
         "--mean_pooling",
         default=True,
         action=argparse.BooleanOptionalAction,
-        help="Apply mean pooling to embeddings (default: True). Use --no-mean_pooling to disable."
+        help="Apply mean pooling to embeddings (default: True). Use --no-mean_pooling to disable.",
     )
 
     args = parser.parse_args()
@@ -261,10 +229,6 @@ def main() -> None:
             f"CUDA is not available but device {args.device} was specified. "
             "Please use 'cpu' or ensure CUDA is properly configured."
         )
-
-    # Validate batch size
-    if args.batch_size < 1:
-        parser.error(f"Batch size must be at least 1, got {args.batch_size}")
 
     logger.info(f"Processing file: {args.fasta_path}")
     logger.info(f"Output path: {args.output_path}")
@@ -304,4 +268,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
