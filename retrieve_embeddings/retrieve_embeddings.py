@@ -205,12 +205,6 @@ def main() -> None:
         action="store_true",
         help="Prepend BOS token to sequences (default: False)",
     )
-    parser.add_argument(
-        "--mean_pooling",
-        default=True,
-        action=argparse.BooleanOptionalAction,
-        help="Apply mean pooling to embeddings (default: True). Use --no-mean_pooling to disable.",
-    )
 
     args = parser.parse_args()
 
@@ -254,7 +248,6 @@ def main() -> None:
             batch_size=args.batch_size,
             device=args.device,
             prepend_bos=args.prepend_bos,
-            mean_pooling=args.mean_pooling,
         )
 
         logger.info("Embedding extraction completed successfully")
