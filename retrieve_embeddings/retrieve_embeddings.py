@@ -69,6 +69,7 @@ def process_sequences(
     batch_size: int = 8,
     device: str = "cuda:0",
     prepend_bos: bool = True,
+    max_seq_length: int = None,
 ) -> None:
     """
     Process sequences in batches and extract embeddings.
@@ -82,7 +83,7 @@ def process_sequences(
         batch_size: Number of sequences to process per batch (default: 8)
         device: Device to run inference on (default: "cuda:0")
         prepend_bos: Whether to prepend BOS token (default: False)
-
+        max_seq_length: Maximum sequence length to pad to (default: None)
     Raises:
         ValueError: If sequences and sequence_ids have different lengths
     """
@@ -112,6 +113,7 @@ def process_sequences(
                 tokenizer=tokenizer,
                 prepend_bos=prepend_bos,
                 device=device,
+                max_seq_length=max_seq_length,
             )
             try:
                 # The Evo model forward pass returns (logits, hidden_states)
@@ -231,7 +233,9 @@ def main() -> None:
 
     try:
         # Load sequences from FASTA file
-        sequences, sequence_ids = load_sequences_from_fasta(args.fasta_path)
+        sequences, sequence_ids, max_seq_length = load_sequences_from_fasta(
+            args.fasta_path
+        )
 
         # Initialize model and configure for embedding extraction
         model, tokenizer = setup_model_for_embeddings(
@@ -245,6 +249,7 @@ def main() -> None:
             tokenizer=tokenizer,
             sequences=sequences,
             sequence_ids=sequence_ids,
+            max_seq_length=max_seq_length,
             output_path=args.output_path,
             batch_size=args.batch_size,
             device=args.device,

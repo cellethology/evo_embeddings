@@ -11,7 +11,6 @@ logger = logging.getLogger(__name__)
 # Valid DNA/RNA characters (including IUPAC ambiguity codes)
 VALID_DNA_CHARS = set("ATCG")
 # Maximum sequence length to prevent OOM (adjust based on model context length)
-MAX_SEQUENCE_LENGTH = 8_192  # 8192 context for evo-1.5-8k-base
 MIN_SEQUENCE_LENGTH = 1
 
 
@@ -36,13 +35,6 @@ def validate_sequence(sequence: str, seq_id: str = "") -> Tuple[bool, str]:
             f"{': ' + seq_id if seq_id else ''}"
         )
 
-    if seq_len > MAX_SEQUENCE_LENGTH:
-        # input sequence can be longer than context length, performance may be impacted
-        return True, (
-            f"WARNING: sequence longer than context length (length {seq_len}, maximum {MAX_SEQUENCE_LENGTH})"
-            f"{': ' + seq_id if seq_id else ''}"
-        )
-
     # Check for invalid characters
     sequence_upper = sequence.upper()
     invalid_chars = set(sequence_upper) - VALID_DNA_CHARS
@@ -57,7 +49,7 @@ def validate_sequence(sequence: str, seq_id: str = "") -> Tuple[bool, str]:
 
 def load_sequences_from_fasta(
     fasta_path: str,
-) -> Tuple[List[str], List[str]]:
+) -> Tuple[List[str], List[str], int]:
     """
     Load sequences from a FASTA file using SeqIO.
 
@@ -65,18 +57,16 @@ def load_sequences_from_fasta(
         fasta_path: Path to the input FASTA file
 
     Returns:
-        Tuple of (sequences, sequence_ids) where sequences are validated DNA sequences
+        Tuple of (sequences, sequence_ids, max_seq_length) where sequences are validated DNA sequences
         and sequence_ids are their corresponding identifiers
-
-    Raises:
-        FileNotFoundError: If the FASTA file does not exist
-        ValueError: If no valid sequences are found
+        max_seq_length is the maximum sequence length in the file
     """
     if not os.path.exists(fasta_path):
         raise FileNotFoundError(f"FASTA file not found: {fasta_path}")
 
     sequences: List[str] = []
     sequence_ids: List[str] = []
+    max_seq_length = 0
     invalid_count = 0
 
     logger.info(f"Loading sequences from {fasta_path}...")
@@ -85,6 +75,9 @@ def load_sequences_from_fasta(
         for record in SeqIO.parse(handle, "fasta"):
             seq_id = record.id
             sequence = str(record.seq).upper()
+            seq_len = len(sequence)
+            if seq_len > max_seq_length:
+                max_seq_length = seq_len
 
             # Validate sequence
             is_valid, error_msg = validate_sequence(sequence, seq_id)
@@ -107,7 +100,7 @@ def load_sequences_from_fasta(
         f"(skipped {invalid_count} invalid sequences)"
     )
 
-    return sequences, sequence_ids
+    return sequences, sequence_ids, max_seq_length
 
 
 def save_embeddings_to_npz(
@@ -150,4 +143,3 @@ def save_embeddings_to_npz(
     np.savez_compressed(output_path, ids=ids_array, embeddings=embeddings_array)
 
     logger.info(f"Saved {len(ids)} embeddings to {output_path}")
-
