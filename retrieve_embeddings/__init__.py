@@ -6,10 +6,9 @@ for DNA sequences stored in FASTA files.
 """
 
 from .retrieve_embeddings import (
-    extract_embeddings_batch,
+    main,
     process_sequences,
     setup_model_for_embeddings,
-    main,
 )
 from .util import (
     load_sequences_from_fasta,
@@ -18,7 +17,6 @@ from .util import (
 )
 
 __all__ = [
-    "extract_embeddings_batch",
     "process_sequences",
     "setup_model_for_embeddings",
     "main",
@@ -26,4 +24,3 @@ __all__ = [
     "save_embeddings_to_npz",
     "validate_sequence",
 ]
-
