@@ -23,29 +23,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class CustomEmbedding(nn.Module):
-    """
-    Custom embedding module that replaces the unembed function with identity.
-    This removes the final projection back from the embedding space into tokens,
-    so the "logits" of the model is now the final layer embedding.
-    
-    See source for unembed:
-    https://huggingface.co/togethercomputer/evo-1-131k-base/blob/main/model.py#L339
-    """
-    
-    def unembed(self, u: torch.Tensor) -> torch.Tensor:
-        """
-        Identity function that returns embeddings as-is.
-        
-        Args:
-            u: Input embeddings tensor
-            
-        Returns:
-            Same embeddings tensor (no transformation)
-        """
-        return u
-
-
 def setup_model_for_embeddings(
     model_name: str = "evo-1.5-8k-base",
     device: str = "cuda:0",
@@ -66,11 +43,6 @@ def setup_model_for_embeddings(
     model.to(device)
     model.eval()
     
-    # Monkey patch the unembed function with identity
-    # This removes the final projection back from the embedding space into tokens
-    # so the "logits" of the model is now the final layer embedding
-    model.unembed = CustomEmbedding()
-    
     logger.info("Model loaded and configured for embedding extraction")
     return model, tokenizer
 
@@ -86,7 +58,7 @@ def extract_embeddings_batch(
     Extract embeddings for a batch of sequences.
 
     Args:
-        model: Evo model instance (configured with CustomEmbedding)
+        model: Evo model instance
         tokenizer: Evo tokenizer instance
         sequences: List of DNA sequences to process
         device: Device to run inference on (default: "cuda:0")
@@ -106,7 +78,6 @@ def extract_embeddings_batch(
     )
 
     # Extract embeddings using forward pass
-    # After monkey patching unembed, the model returns embeddings instead of logits
     with torch.no_grad():
         embeddings, _ = model(input_ids)  # (batch, length, embed_dim)
 
@@ -128,7 +99,7 @@ def process_sequences(
     Process sequences in batches and extract embeddings.
 
     Args:
-        model: Evo model instance (configured with CustomEmbedding)
+        model: Evo model instance
         tokenizer: Evo tokenizer instance
         sequences: List of DNA sequences to process
         sequence_ids: List of sequence identifiers corresponding to sequences
