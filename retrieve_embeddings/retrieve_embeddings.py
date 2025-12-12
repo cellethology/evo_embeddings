@@ -103,11 +103,16 @@ def process_sequences(
 
     # Lists to collect all embeddings and IDs
     all_embeddings: List[np.ndarray] = []
+    all_ids: List[str] = []
+    offset = 0
 
     with torch.inference_mode():
         for batch_sequences in tqdm(
             dataloader, desc="Extracting Features", unit="batch"
         ):
+            batch_ids = sequence_ids[offset : offset + len(batch_sequences)]
+            offset += len(batch_sequences)
+
             input_ids, _ = prepare_batch(
                 seqs=batch_sequences,
                 tokenizer=tokenizer,
@@ -133,6 +138,7 @@ def process_sequences(
                 all_embeddings.append(
                     sequence_embeddings.to(dtype=torch.float32).cpu().numpy()
                 )
+                all_ids.extend(batch_ids)
 
             except torch.cuda.OutOfMemoryError:
                 print("CUDA Out of Memory on a batch. Skipping batch.")
